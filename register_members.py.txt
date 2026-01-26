@@ -1,0 +1,34 @@
+import database
+
+# 登録するメンバーリスト
+# 形式: (名前, パスワード, 部署名, 権限)
+MEMBERS = [
+    ("古賀", "1234", "事務局", "admin"),
+    ("森岡", "1234", "事務局", "staff"),
+    ("松田", "1234", "事務局", "staff"),
+    ("矢野", "1234", "施設管理", "staff"),
+    ("片岡", "1234", "施設管理", "staff"),
+    ("山本", "1234", "カヌーアカデミー", "staff"),
+    ("梅原", "1234", "カヌーアカデミー", "staff"),
+    ("眞田", "1234", "カヌーアカデミー", "staff"),
+]
+
+def run_registration():
+    # データベースのテーブル準備
+    database.create_tables()
+    
+    print("--- メンバー登録を開始します ---")
+    
+    for name, pw, dept, role in MEMBERS:
+        # すでに登録されているかチェック
+        existing_user = database.get_user_by_username(name)
+        if existing_user:
+            print(f"【スキップ】{name} さんは既に登録されています。")
+        else:
+            database.create_user(name, pw, dept, role)
+            print(f"【成功】{name} さん（{dept}）を登録しました。")
+            
+    print("--- 登録作業が終了しました ---")
+
+if __name__ == '__main__':
+    run_registration()

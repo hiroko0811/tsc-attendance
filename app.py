@@ -1,22 +1,23 @@
 import streamlit as st
-from datetime import datetime, timedelta, timezone
-JST = timezone(timedelta(hours=+9))
+from datetime import datetime, timedelta, timezone, date
 import pandas as pd
-from datetime import datetime, date
 import auth
 import database
 import calendar
 import utils
 
+# --- 0. 日本時間の設定（すべての基準） ---
+JST = timezone(timedelta(hours=+9))
+now = datetime.now(JST)
+
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
 # --- 2. 自動メンバー登録ブロック ---
-# アプリ起動時に、メンバーがいなければ自動で作成します
 def initialize_system():
     database.create_tables()
     
-    # 登録したいメンバーリスト
+    # 登録したいメンバーリスト（維持）
     members_to_add = [
         ("古賀", "1234", "事務局", "admin"),
         ("森岡", "1234", "事務局", "staff"),
@@ -74,7 +75,7 @@ def login_page():
                 st.error("ユーザー名またはパスワードが間違っています")
 
 def attendance_table_view(user):
-    time = datetime.now(JST)
+    # ここでエラーの元だった 'now' を一番上で定義した変数から取得します
     if 'at_view_year' not in st.session_state: st.session_state['at_view_year'] = now.year
     if 'at_view_month' not in st.session_state: st.session_state['at_view_month'] = now.month
     
@@ -217,17 +218,20 @@ def attendance_table_view(user):
 
 def staff_dashboard(user):
     st.header(f"本日の状況 - {user['username']}")
-    rec = database.get_today_record(user['id'])
+    st.write(f"現在時刻: {now.strftime('%H:%M')}")
     
+    rec = database.get_today_record(user['id'])
     is_not_started = not rec or (not rec.get('start_time') and not rec.get('end_time'))
     
     if is_not_started:
         if st.button("【 出 勤 】", type="primary", use_container_width=True):
+            # 日本時間で出勤記録
             database.clock_in(user['id'], "Academy")
             st.rerun()
     elif rec.get('status') == 'working':
         st.info("勤務中")
         if st.button("【 退 勤 】", type="primary", use_container_width=True):
+            # 日本時間で退勤記録
             database.clock_out(user['id'], end_time=datetime.now(JST))
             st.rerun()
     else:

@@ -1,4 +1,6 @@
 import streamlit as st
+from datetime import datetime, timedelta, timezone
+JST = timezone(timedelta(hours=+9))
 import pandas as pd
 from datetime import datetime, date
 import auth
@@ -72,7 +74,7 @@ def login_page():
                 st.error("ユーザー名またはパスワードが間違っています")
 
 def attendance_table_view(user):
-    now = datetime.now()
+    now = datetime.now(JST)
     if 'at_view_year' not in st.session_state: st.session_state['at_view_year'] = now.year
     if 'at_view_month' not in st.session_state: st.session_state['at_view_month'] = now.month
     
@@ -226,7 +228,7 @@ def staff_dashboard(user):
     elif rec.get('status') == 'working':
         st.info("勤務中")
         if st.button("【 退 勤 】", type="primary", use_container_width=True):
-            database.clock_out(user['id'], end_time=datetime.now())
+            database.clock_out(user['id'], end_time=datetime.now(JST))
             st.rerun()
     else:
         st.success("本日の業務は終了しました")

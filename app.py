@@ -74,7 +74,7 @@ def login_page():
                 st.error("ユーザー名またはパスワードが間違っています")
 
 def attendance_table_view(user):
-    now = datetime.now(JST)
+    time = datetime.now(JST)
     if 'at_view_year' not in st.session_state: st.session_state['at_view_year'] = now.year
     if 'at_view_month' not in st.session_state: st.session_state['at_view_month'] = now.month
     

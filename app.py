@@ -264,13 +264,11 @@ def staff_dashboard(user):
     
     if is_not_started:
         if st.button("【 出 勤 】", type="primary", use_container_width=True):
-            # ★ここで日本時間を渡すように修正しました！
             database.clock_in(user['id'], "Academy", start_time=now)
             st.rerun()
     elif rec.get('status') == 'working':
         st.info("勤務中")
         if st.button("【 退 勤 】", type="primary", use_container_width=True):
-            # ★退勤も日本時間を明示的に渡します
             database.clock_out(user['id'], end_time=now)
             st.rerun()
     else:

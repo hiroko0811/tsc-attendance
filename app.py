@@ -6,7 +6,7 @@ import database
 import calendar
 import utils
 
-# --- 0. 日本時間の設定（すべての基準） ---
+# --- 0. 日本時間の設定 ---
 JST = timezone(timedelta(hours=+9))
 now = datetime.now(JST)
 
@@ -17,7 +17,7 @@ st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 def initialize_system():
     database.create_tables()
     
-    # 登録したいメンバーリスト（維持）
+    # 登録したいメンバーリスト
     members_to_add = [
         ("古賀", "1234", "事務局", "admin"),
         ("森岡", "1234", "事務局", "staff"),
@@ -75,7 +75,7 @@ def login_page():
                 st.error("ユーザー名またはパスワードが間違っています")
 
 def attendance_table_view(user):
-    # ここでエラーの元だった 'now' を一番上で定義した変数から取得します
+    # 日本時間を使用
     if 'at_view_year' not in st.session_state: st.session_state['at_view_year'] = now.year
     if 'at_view_month' not in st.session_state: st.session_state['at_view_month'] = now.month
     
@@ -225,14 +225,14 @@ def staff_dashboard(user):
     
     if is_not_started:
         if st.button("【 出 勤 】", type="primary", use_container_width=True):
-            # 日本時間で出勤記録
-            database.clock_in(user['id'], "Academy")
+            # ★ここで日本時間を渡すように修正しました！
+            database.clock_in(user['id'], "Academy", start_time=now)
             st.rerun()
     elif rec.get('status') == 'working':
         st.info("勤務中")
         if st.button("【 退 勤 】", type="primary", use_container_width=True):
-            # 日本時間で退勤記録
-            database.clock_out(user['id'], end_time=datetime.now(JST))
+            # ★退勤も日本時間を明示的に渡します
+            database.clock_out(user['id'], end_time=now)
             st.rerun()
     else:
         st.success("本日の業務は終了しました")

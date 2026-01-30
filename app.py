@@ -13,25 +13,64 @@ now = datetime.now(JST)
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
-# --- 2. 自動メンバー登録ブロック ---
+# --- 2. 自動メンバー登録 & デフォルト予定設定ブロック ---
 def initialize_system():
     database.create_tables()
     
     # 登録したいメンバーリスト
+    # (名前, パスワード, 部署, ロール, 予定開始, 予定終了, 休み設定)
+    # 休み設定: "sh" (土日祝), "sun" (日のみ), "sat" (土のみ), "" (なし)
     members_to_add = [
-        ("古賀", "1234", "事務局", "admin"),
-        ("森岡", "1234", "事務局", "staff"),
-        ("松田", "1234", "事務局", "staff"),
-        ("矢野", "1234", "施設管理", "staff"),
-        ("片岡", "1234", "施設管理", "staff"),
-        ("山本", "1234", "カヌーアカデミー", "staff"),
-        ("梅原", "1234", "カヌーアカデミー", "staff"),
-        ("眞田", "1234", "カヌーアカデミー", "staff"),
+        ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
+        ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
+        ("松田", "1234", "事務局", "staff", "09:00", "17:00", "sh"),
+        ("矢野", "1234", "施設管理", "staff", "08:30", "17:15", "sun"),
+        ("片岡", "1234", "施設管理", "staff", "09:00", "17:00", "sat"),
+        ("山本", "1234", "カヌーアカデミー", "staff", "", "", ""),
+        ("梅原", "1234", "カヌーアカデミー", "staff", "", "", ""),
+        ("眞田", "1234", "カヌーアカデミー", "staff", "", "", ""),
     ]
     
-    for name, pw, dept, role in members_to_add:
-        if not database.get_user_by_username(name):
+    # 今月の情報を取得
+    y, m = now.year, now.month
+    num_days = calendar.monthrange(y, m)[1]
+
+    for name, pw, dept, role, def_start, def_end, holiday_type in members_to_add:
+        # 1. ユーザーがいなければ作成
+        user = database.get_user_by_username(name)
+        if not user:
             database.create_user(name, pw, dept, role)
+            user = database.get_user_by_username(name)
+        
+        # 2. 今月の予定がまだ1件もなければ、基本時間をセット
+        if def_start and def_end:
+            existing_records = database.get_monthly_records(user['id'], y, m)
+            if not existing_records: # まだ今月のデータが何もない場合のみ実行
+                for day in range(1, num_days + 1):
+                    t_date = date(y, m, day)
+                    weekday = t_date.weekday() # 0=月, 5=土, 6=日
+                    is_holiday = utils.is_jp_holiday(t_date)
+                    
+                    skip = False
+                    if holiday_type == "sh": # 土日祝休み
+                        if weekday >= 5 or is_holiday: skip = True
+                    elif holiday_type == "sun": # 日曜休み
+                        if weekday == 6: skip = True
+                    elif holiday_type == "sat": # 土曜休み
+                        if weekday == 5: skip = True
+                    
+                    if skip:
+                        continue 
+                    
+                    dt_ps = datetime.strptime(def_start, "%H:%M")
+                    dt_pe = datetime.strptime(def_end, "%H:%M")
+                    
+                    database.upsert_attendance_record(
+                        user['id'], t_date,
+                        scheduled_start_time=datetime.combine(t_date, dt_ps.time()),
+                        scheduled_end_time=datetime.combine(t_date, dt_pe.time()),
+                        scheduled_break_duration=60 
+                    )
 
 # システムの初期化実行
 initialize_system()

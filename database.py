@@ -51,7 +51,13 @@ def create_tables():
 
 # --- 打刻・データ操作 ---
 
-def clock_in(user_id, work_tag):
+# 修正後（末尾に , start_time=None を追加）
+def clock_in(user_id, work_tag, start_time=None):
+    if start_time is None:
+        from datetime import datetime, timedelta, timezone
+        JST = timezone(timedelta(hours=+9))
+        start_time = datetime.now(JST)
+    # ...以下の処理はそのまま...
     conn = get_connection()
     c = conn.cursor()
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

@@ -13,66 +13,61 @@ now = datetime.now(JST)
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
-# --- 2. 自動メンバー登録 & デフォルト予定設定ブロック ---
+# メンバーリストの定義（共通で使うため外に出しました）
+MEMBERS_CONFIG = [
+    ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
+    ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
+    ("松田", "1234", "事務局", "staff", "09:00", "17:00", "sh"),
+    ("矢野", "1234", "施設管理", "staff", "08:30", "17:15", "sun"),
+    ("片岡", "1234", "施設管理", "staff", "09:00", "17:00", "sat"),
+    ("山本", "1234", "カヌーアカデミー", "staff", "", "", ""),
+    ("梅原", "1234", "カヌーアカデミー", "staff", "", "", ""),
+    ("眞田", "1234", "カヌーアカデミー", "staff", "", "", ""),
+]
+
+# --- 2. 自動メンバー登録 & 予定作成ロジック ---
 def initialize_system():
     database.create_tables()
-    
-    # 登録したいメンバーリスト
-    # (名前, パスワード, 部署, ロール, 予定開始, 予定終了, 休み設定)
-    # 休み設定: "sh" (土日祝), "sun" (日のみ), "sat" (土のみ), "" (なし)
-    members_to_add = [
-        ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
-        ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
-        ("松田", "1234", "事務局", "staff", "09:00", "17:00", "sh"),
-        ("矢野", "1234", "施設管理", "staff", "08:30", "17:15", "sun"),
-        ("片岡", "1234", "施設管理", "staff", "09:00", "17:00", "sat"),
-        ("山本", "1234", "カヌーアカデミー", "staff", "", "", ""),
-        ("梅原", "1234", "カヌーアカデミー", "staff", "", "", ""),
-        ("眞田", "1234", "カヌーアカデミー", "staff", "", "", ""),
-    ]
-    
-    # 今月の情報を取得
-    y, m = now.year, now.month
-    num_days = calendar.monthrange(y, m)[1]
-
-    for name, pw, dept, role, def_start, def_end, holiday_type in members_to_add:
-        # 1. ユーザーがいなければ作成
-        user = database.get_user_by_username(name)
-        if not user:
+    for name, pw, dept, role, _, _, _ in MEMBERS_CONFIG:
+        if not database.get_user_by_username(name):
             database.create_user(name, pw, dept, role)
-            user = database.get_user_by_username(name)
-        
-        # 2. 今月の予定がまだ1件もなければ、基本時間をセット
-        if def_start and def_end:
-            existing_records = database.get_monthly_records(user['id'], y, m)
-            if not existing_records: # まだ今月のデータが何もない場合のみ実行
+
+def auto_generate_schedule(user, year, month):
+    """選んだ年・月の予定がなければ作成する機能"""
+    num_days = calendar.monthrange(year, month)[1]
+    
+    # このユーザーの、この年・月のデータを取得
+    existing_records = database.get_monthly_records(user['id'], year, month)
+    
+    # まだデータが1件もない場合のみ、基本設定を探して作成
+    if not existing_records:
+        # メンバーリストからこの人の設定を探す
+        config = next((m for m in MEMBERS_CONFIG if m[0] == user['username']), None)
+        if config:
+            name, _, _, _, def_start, def_end, holiday_type = config
+            if def_start and def_end:
                 for day in range(1, num_days + 1):
-                    t_date = date(y, m, day)
-                    weekday = t_date.weekday() # 0=月, 5=土, 6=日
+                    t_date = date(year, month, day)
+                    weekday = t_date.weekday()
                     is_holiday = utils.is_jp_holiday(t_date)
                     
                     skip = False
-                    if holiday_type == "sh": # 土日祝休み
-                        if weekday >= 5 or is_holiday: skip = True
-                    elif holiday_type == "sun": # 日曜休み
-                        if weekday == 6: skip = True
-                    elif holiday_type == "sat": # 土曜休み
-                        if weekday == 5: skip = True
+                    if holiday_type == "sh" and (weekday >= 5 or is_holiday): skip = True
+                    elif holiday_type == "sun" and weekday == 6: skip = True
+                    elif holiday_type == "sat" and weekday == 5: skip = True
                     
-                    if skip:
-                        continue 
-                    
-                    dt_ps = datetime.strptime(def_start, "%H:%M")
-                    dt_pe = datetime.strptime(def_end, "%H:%M")
-                    
-                    database.upsert_attendance_record(
-                        user['id'], t_date,
-                        scheduled_start_time=datetime.combine(t_date, dt_ps.time()),
-                        scheduled_end_time=datetime.combine(t_date, dt_pe.time()),
-                        scheduled_break_duration=60 
-                    )
+                    if not skip:
+                        dt_ps = datetime.strptime(def_start, "%H:%M")
+                        dt_pe = datetime.strptime(def_end, "%H:%M")
+                        database.upsert_attendance_record(
+                            user['id'], t_date,
+                            scheduled_start_time=datetime.combine(t_date, dt_ps.time()),
+                            scheduled_end_time=datetime.combine(t_date, dt_pe.time()),
+                            scheduled_break_duration=60 
+                        )
+                st.rerun() # 予定を作ったら画面を再読み込み
 
-# システムの初期化実行
+# 初期化実行
 initialize_system()
 
 # --- ヘルパー関数 ---
@@ -114,7 +109,6 @@ def login_page():
                 st.error("ユーザー名またはパスワードが間違っています")
 
 def attendance_table_view(user):
-    # 日本時間を使用
     if 'at_view_year' not in st.session_state: st.session_state['at_view_year'] = now.year
     if 'at_view_month' not in st.session_state: st.session_state['at_view_month'] = now.month
     
@@ -124,6 +118,9 @@ def attendance_table_view(user):
         m = st.number_input("月", value=st.session_state['at_view_month'], min_value=1, max_value=12)
         st.session_state['at_view_year'] = y
         st.session_state['at_view_month'] = m
+
+    # ★ここで、選んだ年月の予定を自動作成します
+    auto_generate_schedule(user, y, m)
 
     st.header(f"勤怠表 ({y}年度 {m}月度) - {user['username']}")
     edit_mode = st.toggle("編集モード (Edit Mode)", value=False)

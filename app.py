@@ -13,7 +13,7 @@ now = datetime.now(JST)
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
-# メンバーリスト
+# メンバーリスト（共通設定）
 MEMBERS_CONFIG = [
     ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
     ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
@@ -25,7 +25,7 @@ MEMBERS_CONFIG = [
     ("眞田", "1234", "カヌーアカデミー", "staff", "", "", ""),
 ]
 
-# 休暇・勤務種類の選択肢（「公休」を「休日勤務」の前に追加）
+# 休暇種類の選択肢
 LEAVE_TYPES = ["", "公休", "休日勤務", "有給休暇", "振替休暇", "特別休暇", "早退", "遅刻"]
 
 # --- 2. 自動メンバー登録 & 予定作成ロジック ---
@@ -36,19 +36,23 @@ def initialize_system():
             database.create_user(name, pw, dept, role)
 
 def auto_generate_schedule(user, year, month):
+    """表示している年月のデータがなければ、実績データを保護しつつ予定を作成"""
     num_days = calendar.monthrange(year, month)[1]
     existing_records = database.get_monthly_records(user['id'], year, month)
-    config = next((m for m in MEMBERS_CONFIG if m[0] == user['username']), None)
     
+    config = next((m for m in MEMBERS_CONFIG if m[0] == user['username']), None)
     if config:
         name, _, _, _, def_start, def_end, holiday_type = config
         if def_start and def_end:
             updated = False
             for day in range(1, num_days + 1):
+                # 実績データがある日は上書きしない
                 if day in existing_records: continue
+                
                 t_date = date(year, month, day)
                 weekday = t_date.weekday()
                 is_holiday = utils.is_jp_holiday(t_date)
+                
                 skip = False
                 if holiday_type == "sh" and (weekday >= 5 or is_holiday): skip = True
                 elif holiday_type == "sun_holi" and (weekday == 6 or is_holiday): skip = True
@@ -115,6 +119,7 @@ def attendance_table_view(user):
         st.session_state['at_view_year'] = y
         st.session_state['at_view_month'] = m
 
+    # ★ 画面で選択した年月の予定を自動作成
     auto_generate_schedule(user, y, m)
 
     st.header(f"勤怠表 ({y}年度 {m}月度) - {user['username']}")
@@ -220,7 +225,7 @@ def attendance_table_view(user):
             if r['lt'] in LEAVE_TYPES: idx = LEAVE_TYPES.index(r['lt'])
             c[10].selectbox("LT", LEAVE_TYPES, index=idx, key=r['keys']['lt'], label_visibility="collapsed")
             
-            c[11].text_input("NT", r['nt'], key=r['keys']['nt'], label_visibility="collapsed")
+            c[11].text_input("NT", r['nt'], key=r['keys']['NT'], label_visibility="collapsed")
 
         if st.button("全データを保存", type="primary", use_container_width=True):
             for r in rows:
@@ -228,59 +233,4 @@ def attendance_table_view(user):
                 s_ps = normalize_time_str(st.session_state.get(r['keys']['ps'], ""))
                 s_pe = normalize_time_str(st.session_state.get(r['keys']['pe'], ""))
                 s_pb = to_float(st.session_state.get(r['keys']['pb'], 1.0))
-                s_as = normalize_time_str(st.session_state.get(r['keys']['as'], ""))
-                s_ae = normalize_time_str(st.session_state.get(r['keys']['ae'], ""))
-                s_ab = to_float(st.session_state.get(r['keys']['ab'], 1.0))
-                s_nt = st.session_state.get(r['keys']['nt'], "")
-                s_lt = st.session_state.get(r['keys']['lt'], "")
-                s_aw_man = to_float(st.session_state.get(r['keys']['aw'], 0.0))
-                
-                dt_ps = datetime.strptime(s_ps, "%H:%M") if s_ps else None
-                dt_pe = datetime.strptime(s_pe, "%H:%M") if s_pe else None
-                dt_as = datetime.strptime(s_as, "%H:%M") if s_as else None
-                dt_ae = datetime.strptime(s_ae, "%H:%M") if s_ae else None
-                
-                mins = int(max(0.0, (dt_ae-dt_as).total_seconds()/3600 - s_ab)*60) if (dt_as and dt_ae) else int(s_aw_man*60)
-                
-                database.upsert_attendance_record(
-                    user['id'], t_date,
-                    start_time=datetime.combine(t_date, dt_as.time()) if dt_as else None,
-                    end_time=datetime.combine(t_date, dt_ae.time()) if dt_ae else None,
-                    break_duration=int(s_ab*60), manual_work_time=mins, note=s_nt,
-                    leave_type=s_lt,
-                    scheduled_start_time=datetime.combine(t_date, dt_ps.time()) if dt_ps else None,
-                    scheduled_end_time=datetime.combine(t_date, dt_pe.time()) if dt_pe else None,
-                    scheduled_break_duration=int(s_pb*60)
-                )
-            st.success("保存しました！"); st.rerun()
-
-def staff_dashboard(user):
-    st.header(f"本日の状況 - {user['username']}")
-    st.write(f"現在時刻: {now.strftime('%H:%M')}")
-    rec = database.get_today_record(user['id'])
-    if not rec or (not rec.get('start_time') and not rec.get('end_time')):
-        if st.button("【 出 勤 】", type="primary", use_container_width=True):
-            database.clock_in(user['id'], "Academy", start_time=now); st.rerun()
-    elif rec.get('status') == 'working':
-        if st.button("【 退 勤 】", type="primary", use_container_width=True):
-            database.clock_out(user['id'], end_time=now); st.rerun()
-    else:
-        st.success("本日の業務は終了しました")
-
-def main():
-    if 'app_phase' not in st.session_state: st.session_state['app_phase'] = 'portal'
-    if st.session_state['app_phase'] == 'portal':
-        st.title("TSC 勤怠システム")
-        if st.button("ログイン画面へ"): st.session_state['app_phase'] = 'login'; st.rerun()
-    elif st.session_state['app_phase'] == 'login':
-        login_page()
-    elif st.session_state['app_phase'] == 'dashboard':
-        user = st.session_state.get('user')
-        with st.sidebar:
-            mode = st.radio("メニュー", ["本日の状況", "勤怠表"])
-            if st.button("ログアウト"): del st.session_state['user']; st.session_state['app_phase'] = 'portal'; st.rerun()
-        if mode == "本日の状況": staff_dashboard(user)
-        elif mode == "勤怠表": attendance_table_view(user)
-
-if __name__ == '__main__':
-    main()
+                s_as = normalize_time_str(st.session_state.get(r['keys']['

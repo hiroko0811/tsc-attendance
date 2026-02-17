@@ -18,8 +18,8 @@ MEMBERS_CONFIG = [
     ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
     ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
     ("松田", "1234", "事務局", "staff", "09:00", "17:00", "sh"),
-    ("矢野", "1234", "施設管理", "staff", "08:30", "17:15", "sat"),      # 土曜休み
-    ("片岡", "1234", "施設管理", "staff", "09:00", "17:00", "sun_holi"), # 日曜と祝日が休み
+    ("矢野", "1234", "施設管理", "staff", "08:30", "17:15", "sat"),
+    ("片岡", "1234", "施設管理", "staff", "09:00", "17:00", "sun_holi"),
     ("山本", "1234", "カヌーアカデミー", "staff", "", "", ""),
     ("梅原", "1234", "カヌーアカデミー", "staff", "", "", ""),
     ("眞田", "1234", "カヌーアカデミー", "staff", "", "", ""),
@@ -33,11 +33,8 @@ def initialize_system():
             database.create_user(name, pw, dept, role)
 
 def auto_generate_schedule(user, year, month):
-    """予定を作成する際、既存の実績データがある日は上書きしないように修正"""
     num_days = calendar.monthrange(year, month)[1]
     existing_records = database.get_monthly_records(user['id'], year, month)
-    
-    # 予定作成が必要なメンバー設定を取得
     config = next((m for m in MEMBERS_CONFIG if m[0] == user['username']), None)
     
     if config:
@@ -45,23 +42,15 @@ def auto_generate_schedule(user, year, month):
         if def_start and def_end:
             updated = False
             for day in range(1, num_days + 1):
-                # ★修正ポイント：その日のデータが既に存在する場合はスキップする
-                if day in existing_records:
-                    continue
-                
+                if day in existing_records: continue
                 t_date = date(year, month, day)
                 weekday = t_date.weekday()
                 is_holiday = utils.is_jp_holiday(t_date)
-                
                 skip = False
-                if holiday_type == "sh": # 土日祝休み
-                    if weekday >= 5 or is_holiday: skip = True
-                elif holiday_type == "sun_holi": # 日曜と祝日休み
-                    if weekday == 6 or is_holiday: skip = True
-                elif holiday_type == "sat": # 土曜休み
-                    if weekday == 5: skip = True
-                elif holiday_type == "sat_holi": # 土曜と祝日休み
-                    if weekday == 5 or is_holiday: skip = True
+                if holiday_type == "sh" and (weekday >= 5 or is_holiday): skip = True
+                elif holiday_type == "sun_holi" and (weekday == 6 or is_holiday): skip = True
+                elif holiday_type == "sat" and weekday == 5: skip = True
+                elif holiday_type == "sat_holi" and (weekday == 5 or is_holiday): skip = True
                 
                 if not skip:
                     dt_ps = datetime.strptime(def_start, "%H:%M")
@@ -73,14 +62,11 @@ def auto_generate_schedule(user, year, month):
                         scheduled_break_duration=60 
                     )
                     updated = True
-            
-            if updated:
-                st.rerun()
+            if updated: st.rerun()
 
 initialize_system()
 
-# --- (以下、attendance_table_viewやメイン処理は変更ありませんが、念のため全文維持) ---
-
+# --- ヘルパー関数 ---
 def try_parse_datetime(dt_str):
     if not dt_str: return None
     for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
@@ -99,6 +85,7 @@ def to_float(val):
     try: return float(val)
     except: return 0.0
 
+# --- メイン画面 ---
 def login_page():
     st.header("ログイン")
     with st.form("login_form"):
@@ -160,9 +147,17 @@ def attendance_table_view(user):
         
         v_as = get_v(keys['as'], rec.get('start_time'), True)
         v_ae = get_v(keys['ae'], rec.get('end_time'), True)
-        v_ab = to_float(st.session_state.get(keys['ab'], float(rec.get('break_duration') or 60)/60))
+        
+        # ★ここを修正：データベースに保存されている実績休憩時間を優先して表示します
+        db_ab_val = rec.get('break_duration')
+        if db_ab_val is None:
+            v_ab = to_float(st.session_state.get(keys['ab'], 1.0)) # デフォルトは1時間
+        else:
+            v_ab = to_float(st.session_state.get(keys['ab'], float(db_ab_val)/60))
+            
         v_nt = st.session_state.get(keys['nt'], rec.get('note', ""))
         
+        # 予定時間の計算
         c_pt = 0.0
         try:
             if v_ps and v_pe:
@@ -171,6 +166,7 @@ def attendance_table_view(user):
                 c_pt = max(0.0, (t2-t1).total_seconds()/3600 - v_pb)
         except: pass
         
+        # 実績時間の計算
         c_at_calc = 0.0
         try:
             if v_as and v_ae:
@@ -215,7 +211,7 @@ def attendance_table_view(user):
             c[5].write(f"{r['pt']:.2f}")
             c[6].text_input("AS", r['as'], key=r['keys']['as'], label_visibility="collapsed")
             c[7].text_input("AE", r['ae'], key=r['keys']['ae'], label_visibility="collapsed")
-            c[8].text_input("AB", r['ab'], key=r['keys']['ab'], label_visibility="collapsed")
+            c[8].text_input("AB", f"{r['ab']:.2f}", key=r['keys']['ab'], label_visibility="collapsed")
             c[9].text_input("AW", f"{r['at']:.2f}", key=r['keys']['aw'], label_visibility="collapsed")
             c[10].text_input("NT", r['nt'], key=r['keys']['nt'], label_visibility="collapsed")
 

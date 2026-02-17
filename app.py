@@ -13,7 +13,7 @@ now = datetime.now(JST)
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
-# メンバーリスト（共通設定）
+# メンバーリスト
 MEMBERS_CONFIG = [
     ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
     ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
@@ -36,7 +36,6 @@ def initialize_system():
             database.create_user(name, pw, dept, role)
 
 def auto_generate_schedule(user, year, month):
-    """表示している年月のデータがなければ、実績データを保護しつつ予定を作成"""
     num_days = calendar.monthrange(year, month)[1]
     existing_records = database.get_monthly_records(user['id'], year, month)
     
@@ -46,7 +45,6 @@ def auto_generate_schedule(user, year, month):
         if def_start and def_end:
             updated = False
             for day in range(1, num_days + 1):
-                # 実績データがある日は上書きしない
                 if day in existing_records: continue
                 
                 t_date = date(year, month, day)
@@ -119,7 +117,6 @@ def attendance_table_view(user):
         st.session_state['at_view_year'] = y
         st.session_state['at_view_month'] = m
 
-    # ★ 画面で選択した年月の予定を自動作成
     auto_generate_schedule(user, y, m)
 
     st.header(f"勤怠表 ({y}年度 {m}月度) - {user['username']}")
@@ -161,8 +158,9 @@ def attendance_table_view(user):
         else:
             v_ab = to_float(st.session_state.get(keys['ab'], float(db_ab_val)/60))
             
-        v_nt = st.session_state.get(keys['nt'], rec.get('note', ""))
-        v_lt = st.session_state.get(keys['lt'], rec.get('leave_type', ""))
+        # ★Noneが表示されないように修正
+        v_nt = st.session_state.get(keys['nt'], rec.get('note') or "")
+        v_lt = st.session_state.get(keys['lt'], rec.get('leave_type') or "")
 
         c_pt = 0.0
         try:
@@ -225,7 +223,8 @@ def attendance_table_view(user):
             if r['lt'] in LEAVE_TYPES: idx = LEAVE_TYPES.index(r['lt'])
             c[10].selectbox("LT", LEAVE_TYPES, index=idx, key=r['keys']['lt'], label_visibility="collapsed")
             
-            c[11].text_input("NT", r['nt'], key=r['keys']['NT'], label_visibility="collapsed")
+            # ★エラーの原因だった大文字の'NT'を小文字の'nt'に修正
+            c[11].text_input("NT", r['nt'], key=r['keys']['nt'], label_visibility="collapsed")
 
         if st.button("全データを保存", type="primary", use_container_width=True):
             for r in rows:

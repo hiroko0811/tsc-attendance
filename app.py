@@ -13,8 +13,7 @@ now = datetime.now(JST)
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
-# メンバーリストの定義（休日設定を更新）
-# 休日タイプ: "sh" (土日祝), "sun_holi" (日祝), "sat" (土), "sat_holi" (土祝)
+# メンバーリストの定義
 MEMBERS_CONFIG = [
     ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
     ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
@@ -34,44 +33,54 @@ def initialize_system():
             database.create_user(name, pw, dept, role)
 
 def auto_generate_schedule(user, year, month):
+    """予定を作成する際、既存の実績データがある日は上書きしないように修正"""
     num_days = calendar.monthrange(year, month)[1]
     existing_records = database.get_monthly_records(user['id'], year, month)
     
-    # まだ1件もデータがない場合のみ、基本設定から作成
-    if not existing_records:
-        config = next((m for m in MEMBERS_CONFIG if m[0] == user['username']), None)
-        if config:
-            name, _, _, _, def_start, def_end, holiday_type = config
-            if def_start and def_end:
-                for day in range(1, num_days + 1):
-                    t_date = date(year, month, day)
-                    weekday = t_date.weekday() # 5:土, 6:日
-                    is_holiday = utils.is_jp_holiday(t_date)
-                    
-                    skip = False
-                    if holiday_type == "sh": # 土日祝休み
-                        if weekday >= 5 or is_holiday: skip = True
-                    elif holiday_type == "sun_holi": # 日曜と祝日休み
-                        if weekday == 6 or is_holiday: skip = True
-                    elif holiday_type == "sat": # 土曜休み
-                        if weekday == 5: skip = True
-                    elif holiday_type == "sat_holi": # 土曜と祝日休み
-                        if weekday == 5 or is_holiday: skip = True
-                    
-                    if not skip:
-                        dt_ps = datetime.strptime(def_start, "%H:%M")
-                        dt_pe = datetime.strptime(def_end, "%H:%M")
-                        database.upsert_attendance_record(
-                            user['id'], t_date,
-                            scheduled_start_time=datetime.combine(t_date, dt_ps.time()),
-                            scheduled_end_time=datetime.combine(t_date, dt_pe.time()),
-                            scheduled_break_duration=60 
-                        )
+    # 予定作成が必要なメンバー設定を取得
+    config = next((m for m in MEMBERS_CONFIG if m[0] == user['username']), None)
+    
+    if config:
+        name, _, _, _, def_start, def_end, holiday_type = config
+        if def_start and def_end:
+            updated = False
+            for day in range(1, num_days + 1):
+                # ★修正ポイント：その日のデータが既に存在する場合はスキップする
+                if day in existing_records:
+                    continue
+                
+                t_date = date(year, month, day)
+                weekday = t_date.weekday()
+                is_holiday = utils.is_jp_holiday(t_date)
+                
+                skip = False
+                if holiday_type == "sh": # 土日祝休み
+                    if weekday >= 5 or is_holiday: skip = True
+                elif holiday_type == "sun_holi": # 日曜と祝日休み
+                    if weekday == 6 or is_holiday: skip = True
+                elif holiday_type == "sat": # 土曜休み
+                    if weekday == 5: skip = True
+                elif holiday_type == "sat_holi": # 土曜と祝日休み
+                    if weekday == 5 or is_holiday: skip = True
+                
+                if not skip:
+                    dt_ps = datetime.strptime(def_start, "%H:%M")
+                    dt_pe = datetime.strptime(def_end, "%H:%M")
+                    database.upsert_attendance_record(
+                        user['id'], t_date,
+                        scheduled_start_time=datetime.combine(t_date, dt_ps.time()),
+                        scheduled_end_time=datetime.combine(t_date, dt_pe.time()),
+                        scheduled_break_duration=60 
+                    )
+                    updated = True
+            
+            if updated:
                 st.rerun()
 
 initialize_system()
 
-# --- 以降、ヘルパー関数・画面プログラム ---
+# --- (以下、attendance_table_viewやメイン処理は変更ありませんが、念のため全文維持) ---
+
 def try_parse_datetime(dt_str):
     if not dt_str: return None
     for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
@@ -116,7 +125,6 @@ def attendance_table_view(user):
         st.session_state['at_view_year'] = y
         st.session_state['at_view_month'] = m
 
-    # 閲覧した月の予定を自動作成
     auto_generate_schedule(user, y, m)
 
     st.header(f"勤怠表 ({y}年度 {m}月度) - {user['username']}")

@@ -13,7 +13,7 @@ now = datetime.now(JST)
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="TSC 勤怠システム", layout="wide")
 
-# メンバーリストの定義
+# メンバーリスト
 MEMBERS_CONFIG = [
     ("古賀", "1234", "事務局", "admin", "08:30", "17:15", "sh"),
     ("森岡", "1234", "事務局", "staff", "08:30", "16:30", "sh"),
@@ -24,6 +24,9 @@ MEMBERS_CONFIG = [
     ("梅原", "1234", "カヌーアカデミー", "staff", "", "", ""),
     ("眞田", "1234", "カヌーアカデミー", "staff", "", "", ""),
 ]
+
+# 休暇・勤務種類の選択肢（「公休」を「休日勤務」の前に追加）
+LEAVE_TYPES = ["", "公休", "休日勤務", "有給休暇", "振替休暇", "特別休暇", "早退", "遅刻"]
 
 # --- 2. 自動メンバー登録 & 予定作成ロジック ---
 def initialize_system():
@@ -130,7 +133,7 @@ def attendance_table_view(user):
         wk = jp_days[d_obj.weekday()]
         if utils.is_jp_holiday(d_obj) or d_obj.weekday() >= 5: red_rows.append(day)
         rec = records.get(day, {})
-        keys = {k: f"{k}_{day}" for k in ['ps','pe','pb','as','ae','ab','aw','nt']}
+        keys = {k: f"{k}_{day}" for k in ['ps','pe','pb','as','ae','ab','aw','nt','lt']}
         
         def get_v(key, db_val, is_time=False):
             if key in st.session_state: return st.session_state[key]
@@ -144,20 +147,18 @@ def attendance_table_view(user):
         v_ps = get_v(keys['ps'], rec.get('scheduled_start_time'), True)
         v_pe = get_v(keys['pe'], rec.get('scheduled_end_time'), True)
         v_pb = to_float(st.session_state.get(keys['pb'], float(rec.get('scheduled_break_duration') or 60)/60))
-        
         v_as = get_v(keys['as'], rec.get('start_time'), True)
         v_ae = get_v(keys['ae'], rec.get('end_time'), True)
         
-        # ★ここを修正：データベースに保存されている実績休憩時間を優先して表示します
         db_ab_val = rec.get('break_duration')
         if db_ab_val is None:
-            v_ab = to_float(st.session_state.get(keys['ab'], 1.0)) # デフォルトは1時間
+            v_ab = to_float(st.session_state.get(keys['ab'], 1.0))
         else:
             v_ab = to_float(st.session_state.get(keys['ab'], float(db_ab_val)/60))
             
         v_nt = st.session_state.get(keys['nt'], rec.get('note', ""))
-        
-        # 予定時間の計算
+        v_lt = st.session_state.get(keys['lt'], rec.get('leave_type', ""))
+
         c_pt = 0.0
         try:
             if v_ps and v_pe:
@@ -166,7 +167,6 @@ def attendance_table_view(user):
                 c_pt = max(0.0, (t2-t1).total_seconds()/3600 - v_pb)
         except: pass
         
-        # 実績時間の計算
         c_at_calc = 0.0
         try:
             if v_as and v_ae:
@@ -185,22 +185,24 @@ def attendance_table_view(user):
         rows.append({
             "day": day, "wk": wk,
             "ps": v_ps, "pe": v_pe, "pb": v_pb, "pt": c_pt,
-            "as": v_as, "ae": v_ae, "ab": v_ab, "at": final_at, "nt": v_nt,
+            "as": v_as, "ae": v_ae, "ab": v_ab, "at": final_at, "nt": v_nt, "lt": v_lt,
             "keys": keys
         })
 
     if not edit_mode:
         st.markdown("""<style>.ac-table {width:100%; border-collapse:collapse; font-size:0.9rem;} .ac-table th, .ac-table td {border:1px solid #ccc; text-align:center; padding:4px;} .ac-table th {background:#f2f2f2;} .red-text {color:red;}</style>""", unsafe_allow_html=True)
-        html = '<table class="ac-table"><thead><tr><th rowspan="2">日</th><th rowspan="2">曜</th><th colspan="4">就業 (予定)</th><th colspan="4">就業 (実績)</th><th rowspan="2">備考</th></tr><tr><th>開始</th><th>終了</th><th>休憩</th><th>時間</th><th>出勤</th><th>退勤</th><th>休憩</th><th>時間</th></tr></thead><tbody>'
+        html = '<table class="ac-table"><thead><tr><th rowspan="2">日</th><th rowspan="2">曜</th><th colspan="4">就業 (予定)</th><th colspan="4">就業 (実績)</th><th rowspan="2">種類</th><th rowspan="2">備考</th></tr><tr><th>開始</th><th>終了</th><th>休憩</th><th>時間</th><th>出勤</th><th>退勤</th><th>休憩</th><th>時間</th></tr></thead><tbody>'
         for r in rows:
             cls = "red-text" if r['day'] in red_rows else ""
-            html += f'<tr><td class="{cls}">{r["day"]}</td><td class="{cls}">{r["wk"]}</td><td>{r["ps"]}</td><td>{r["pe"]}</td><td>{r["pb"]:.2f}</td><td>{r["pt"]:.2f}</td><td>{r["as"]}</td><td>{r["ae"]}</td><td>{r["ab"]:.2f}</td><td>{r["at"]:.2f}</td><td style="text-align:left;">{r["nt"]}</td></tr>'
-        html += f'<tr style="font-weight:bold;"><td>合計</td><td></td><td></td><td></td><td>{total_vals["pb"]:.2f}</td><td>{total_vals["pt"]:.2f}</td><td></td><td></td><td>{total_vals["ab"]:.2f}</td><td>{total_vals["at"]:.2f}</td><td></td></tr></tbody></table>'
+            html += f'<tr><td class="{cls}">{r["day"]}</td><td class="{cls}">{r["wk"]}</td><td>{r["ps"]}</td><td>{r["pe"]}</td><td>{r["pb"]:.2f}</td><td>{r["pt"]:.2f}</td><td>{r["as"]}</td><td>{r["ae"]}</td><td>{r["ab"]:.2f}</td><td>{r["at"]:.2f}</td><td>{r["lt"]}</td><td style="text-align:left;">{r["nt"]}</td></tr>'
+        html += f'<tr style="font-weight:bold;"><td>合計</td><td></td><td></td><td></td><td>{total_vals["pb"]:.2f}</td><td>{total_vals["pt"]:.2f}</td><td></td><td></td><td>{total_vals["ab"]:.2f}</td><td>{total_vals["at"]:.2f}</td><td></td><td></td></tr></tbody></table>'
         st.markdown(html, unsafe_allow_html=True)
     else:
-        cols_cfg = [0.5, 0.5, 1.1, 1.1, 0.8, 0.8, 1.1, 1.1, 0.8, 0.8, 2.0]
+        cols_cfg = [0.4, 0.4, 1.0, 1.0, 0.7, 0.7, 1.0, 1.0, 0.7, 0.7, 1.2, 1.5]
         h_cols = st.columns(cols_cfg)
-        for c, t in zip(h_cols, ["日","曜","予始","予終","予休","予時","実始","実終","実休","実時","備考"]): c.markdown(f"**{t}**")
+        headers = ["日","曜","予始","予終","予休","予時","実始","実終","実休","実時","種類","備考"]
+        for c, t in zip(h_cols, headers): c.markdown(f"**{t}**")
+        
         for r in rows:
             c = st.columns(cols_cfg)
             col_mk = f":red[{r['day']}]" if r['day'] in red_rows else f"{r['day']}"
@@ -213,24 +215,39 @@ def attendance_table_view(user):
             c[7].text_input("AE", r['ae'], key=r['keys']['ae'], label_visibility="collapsed")
             c[8].text_input("AB", f"{r['ab']:.2f}", key=r['keys']['ab'], label_visibility="collapsed")
             c[9].text_input("AW", f"{r['at']:.2f}", key=r['keys']['aw'], label_visibility="collapsed")
-            c[10].text_input("NT", r['nt'], key=r['keys']['nt'], label_visibility="collapsed")
+            
+            idx = 0
+            if r['lt'] in LEAVE_TYPES: idx = LEAVE_TYPES.index(r['lt'])
+            c[10].selectbox("LT", LEAVE_TYPES, index=idx, key=r['keys']['lt'], label_visibility="collapsed")
+            
+            c[11].text_input("NT", r['nt'], key=r['keys']['nt'], label_visibility="collapsed")
 
         if st.button("全データを保存", type="primary", use_container_width=True):
             for r in rows:
                 t_date = date(y, m, r['day'])
-                s_ps = normalize_time_str(st.session_state.get(r['keys']['ps'], "")); s_pe = normalize_time_str(st.session_state.get(r['keys']['pe'], ""))
+                s_ps = normalize_time_str(st.session_state.get(r['keys']['ps'], ""))
+                s_pe = normalize_time_str(st.session_state.get(r['keys']['pe'], ""))
                 s_pb = to_float(st.session_state.get(r['keys']['pb'], 1.0))
-                s_as = normalize_time_str(st.session_state.get(r['keys']['as'], "")); s_ae = normalize_time_str(st.session_state.get(r['keys']['ae'], ""))
-                s_ab = to_float(st.session_state.get(r['keys']['ab'], 1.0)); s_nt = st.session_state.get(r['keys']['nt'], "")
+                s_as = normalize_time_str(st.session_state.get(r['keys']['as'], ""))
+                s_ae = normalize_time_str(st.session_state.get(r['keys']['ae'], ""))
+                s_ab = to_float(st.session_state.get(r['keys']['ab'], 1.0))
+                s_nt = st.session_state.get(r['keys']['nt'], "")
+                s_lt = st.session_state.get(r['keys']['lt'], "")
                 s_aw_man = to_float(st.session_state.get(r['keys']['aw'], 0.0))
-                dt_ps = datetime.strptime(s_ps, "%H:%M") if s_ps else None; dt_pe = datetime.strptime(s_pe, "%H:%M") if s_pe else None
-                dt_as = datetime.strptime(s_as, "%H:%M") if s_as else None; dt_ae = datetime.strptime(s_ae, "%H:%M") if s_ae else None
+                
+                dt_ps = datetime.strptime(s_ps, "%H:%M") if s_ps else None
+                dt_pe = datetime.strptime(s_pe, "%H:%M") if s_pe else None
+                dt_as = datetime.strptime(s_as, "%H:%M") if s_as else None
+                dt_ae = datetime.strptime(s_ae, "%H:%M") if s_ae else None
+                
                 mins = int(max(0.0, (dt_ae-dt_as).total_seconds()/3600 - s_ab)*60) if (dt_as and dt_ae) else int(s_aw_man*60)
+                
                 database.upsert_attendance_record(
                     user['id'], t_date,
                     start_time=datetime.combine(t_date, dt_as.time()) if dt_as else None,
                     end_time=datetime.combine(t_date, dt_ae.time()) if dt_ae else None,
                     break_duration=int(s_ab*60), manual_work_time=mins, note=s_nt,
+                    leave_type=s_lt,
                     scheduled_start_time=datetime.combine(t_date, dt_ps.time()) if dt_ps else None,
                     scheduled_end_time=datetime.combine(t_date, dt_pe.time()) if dt_pe else None,
                     scheduled_break_duration=int(s_pb*60)

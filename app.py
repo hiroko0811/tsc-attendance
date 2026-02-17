@@ -233,4 +233,59 @@ def attendance_table_view(user):
                 s_ps = normalize_time_str(st.session_state.get(r['keys']['ps'], ""))
                 s_pe = normalize_time_str(st.session_state.get(r['keys']['pe'], ""))
                 s_pb = to_float(st.session_state.get(r['keys']['pb'], 1.0))
-                s_as = normalize_time_str(st.session_state.get(r['keys']['
+                s_as = normalize_time_str(st.session_state.get(r['keys']['as'], ""))
+                s_ae = normalize_time_str(st.session_state.get(r['keys']['ae'], ""))
+                s_ab = to_float(st.session_state.get(r['keys']['ab'], 1.0))
+                s_nt = st.session_state.get(r['keys']['nt'], "")
+                s_lt = st.session_state.get(r['keys']['lt'], "")
+                s_aw_man = to_float(st.session_state.get(r['keys']['aw'], 0.0))
+                
+                dt_ps = datetime.strptime(s_ps, "%H:%M") if s_ps else None
+                dt_pe = datetime.strptime(s_pe, "%H:%M") if s_pe else None
+                dt_as = datetime.strptime(s_as, "%H:%M") if s_as else None
+                dt_ae = datetime.strptime(s_ae, "%H:%M") if s_ae else None
+                
+                mins = int(max(0.0, (dt_ae-dt_as).total_seconds()/3600 - s_ab)*60) if (dt_as and dt_ae) else int(s_aw_man*60)
+                
+                database.upsert_attendance_record(
+                    user['id'], t_date,
+                    start_time=datetime.combine(t_date, dt_as.time()) if dt_as else None,
+                    end_time=datetime.combine(t_date, dt_ae.time()) if dt_ae else None,
+                    break_duration=int(s_ab*60), manual_work_time=mins, note=s_nt,
+                    leave_type=s_lt,
+                    scheduled_start_time=datetime.combine(t_date, dt_ps.time()) if dt_ps else None,
+                    scheduled_end_time=datetime.combine(t_date, dt_pe.time()) if dt_pe else None,
+                    scheduled_break_duration=int(s_pb*60)
+                )
+            st.success("保存しました！"); st.rerun()
+
+def staff_dashboard(user):
+    st.header(f"本日の状況 - {user['username']}")
+    st.write(f"現在時刻: {now.strftime('%H:%M')}")
+    rec = database.get_today_record(user['id'])
+    if not rec or (not rec.get('start_time') and not rec.get('end_time')):
+        if st.button("【 出 勤 】", type="primary", use_container_width=True):
+            database.clock_in(user['id'], "Academy", start_time=now); st.rerun()
+    elif rec.get('status') == 'working':
+        if st.button("【 退 勤 】", type="primary", use_container_width=True):
+            database.clock_out(user['id'], end_time=now); st.rerun()
+    else:
+        st.success("本日の業務は終了しました")
+
+def main():
+    if 'app_phase' not in st.session_state: st.session_state['app_phase'] = 'portal'
+    if st.session_state['app_phase'] == 'portal':
+        st.title("TSC 勤怠システム")
+        if st.button("ログイン画面へ"): st.session_state['app_phase'] = 'login'; st.rerun()
+    elif st.session_state['app_phase'] == 'login':
+        login_page()
+    elif st.session_state['app_phase'] == 'dashboard':
+        user = st.session_state.get('user')
+        with st.sidebar:
+            mode = st.radio("メニュー", ["本日の状況", "勤怠表"])
+            if st.button("ログアウト"): del st.session_state['user']; st.session_state['app_phase'] = 'portal'; st.rerun()
+        if mode == "本日の状況": staff_dashboard(user)
+        elif mode == "勤怠表": attendance_table_view(user)
+
+if __name__ == '__main__':
+    main()
